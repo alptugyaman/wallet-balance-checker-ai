@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 
 const MORALIS_API_KEY = import.meta.env.VITE_MORALIS_API_KEY
-const COINGECKO_API_KEY = import.meta.env.VITE_COINGECKO_API_KEY
 
 // Para birimi formatı için
 const formatMoney = (amount: number) => {
@@ -25,17 +24,9 @@ const formatAmount = (amount: number) => {
   }).format(amount)
 }
 
-// Axios instance for CoinGecko
-const coingeckoApi = axios.create({
-  baseURL: 'https://api.coingecko.com/api/v3',
-  headers: {
-    'x-cg-demo-api-key': COINGECKO_API_KEY
-  }
-});
-
 // Axios instance for Moralis
 const moralisApi = axios.create({
-  baseURL: 'https://deep-index.moralis.io/api/v2',
+  baseURL: 'https://deep-index.moralis.io/api/v2.2',
   headers: {
     'X-API-Key': MORALIS_API_KEY
   }
@@ -49,22 +40,21 @@ const isValidEthereumAddress = (address: string) => {
 
 interface TokenBalance {
   token_address: string
-  name: string
   symbol: string
+  name: string
   logo?: string
   thumbnail?: string
-  decimals: string
+  decimals: number
   balance: string
-  usdPrice: number
-  totalValue: number
-}
-
-interface TopToken {
-  id: string
-  symbol: string
-  name: string
-  image: string
-  current_price: number
+  balance_formatted: string
+  possible_spam: boolean
+  verified_contract: boolean
+  usd_price: number
+  usd_value: number
+  native_token: boolean
+  portfolio_percentage: number
+  usd_price_24hr_percent_change: number
+  usd_price_24hr_usd_change: number
 }
 
 function App() {
@@ -75,11 +65,8 @@ function App() {
   const [showAll, setShowAll] = useState(false)
   const [totalValue, setTotalValue] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [topTokens, setTopTokens] = useState<Record<string, TopToken>>({})
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [recentAddresses, setRecentAddresses] = useState<string[]>([])
-  const [marketDataLoading, setMarketDataLoading] = useState(true)
-  const [currentPage, setCurrentPage] = useState(1)
 
   // Click-outside handler için ref
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -115,56 +102,6 @@ function App() {
     localStorage.setItem('recentAddresses', JSON.stringify(updated))
   }
 
-  // Market verilerini sırayla al
-  useEffect(() => {
-    const fetchMarketData = async () => {
-      try {
-        const response = await coingeckoApi.get('/coins/markets', {
-          params: {
-            vs_currency: 'usd',
-            order: 'market_cap_desc',
-            per_page: 100,
-            page: currentPage,
-            locale: 'en'
-          }
-        });
-
-        // Token'ları biriktir
-        setTopTokens(prevTokens => {
-          const updatedTokens = { ...prevTokens };
-          response.data.forEach((token: any) => {
-            updatedTokens[token.id] = {
-              id: token.id,
-              symbol: token.symbol.toUpperCase(),
-              name: token.name,
-              current_price: token.current_price || 0,
-              image: token.image
-            };
-          });
-          return updatedTokens;
-        });
-
-        // 100ms bekle ve sonraki sayfaya geç
-        if (currentPage < 10) {
-          setTimeout(() => {
-            setCurrentPage(prev => prev + 1);
-          }, 100);
-        } else {
-          setMarketDataLoading(false);
-        }
-      } catch (error) {
-        console.error('Error fetching market data:', error);
-        setTimeout(() => {
-          setCurrentPage(prev => prev);
-        }, 100);
-      }
-    };
-
-    if (marketDataLoading && currentPage <= 10) {
-      fetchMarketData();
-    }
-  }, [currentPage, marketDataLoading]);
-
   const fetchBalances = async () => {
     if (!address) {
       setError('Lütfen bir cüzdan adresi girin')
@@ -191,71 +128,30 @@ function App() {
     setShowAll(false)
 
     try {
-      // ETH bakiyesi ve token bakiyelerini paralel al
-      const [nativeBalance, tokenResponse] = await Promise.all([
-        moralisApi.get(`/${address}/balance`, {
-          params: {
-            chain: 'eth'
-          }
-        }),
-        moralisApi.get(`/${address}/erc20`, {
-          params: {
-            chain: 'eth'
-          }
-        })
-      ])
-
-      const balances: TokenBalance[] = []
-
-      // Token bakiyelerini işle
-      tokenResponse.data.forEach((token: any) => {
-        // Symbol kontrolü
-        if (!token.symbol) return;
-
-        // CoinGecko'dan token'ı symbol'e göre bul
-        const tokenInfo = Object.values(topTokens).find(t =>
-          t.symbol.toLowerCase() === token.symbol.toLowerCase()
-        )
-
-        if (tokenInfo) {
-          const balance = parseFloat(token.balance) / Math.pow(10, parseInt(token.decimals))
-          balances.push({
-            ...token,
-            usdPrice: tokenInfo.current_price || 0,
-            balance: balance.toString(),
-            totalValue: balance * (tokenInfo.current_price || 0),
-            thumbnail: tokenInfo.image || token.thumbnail
-          })
+      const response = await moralisApi.get(`/wallets/${address}/tokens`, {
+        params: {
+          chain: '0x1'
         }
       })
 
-      // ETH bakiyesini ekle
-      const ethBalance = parseFloat(nativeBalance.data.balance) / 1e18
-      const ethInfo = Object.values(topTokens).find(t => t.symbol?.toLowerCase() === 'eth')
-      if (ethInfo) {
-        balances.push({
-          token_address: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
-          name: ethInfo.name,
-          symbol: ethInfo.symbol,
-          decimals: '18',
-          balance: ethBalance.toString(),
-          usdPrice: ethInfo.current_price,
-          totalValue: ethBalance * ethInfo.current_price,
-          thumbnail: ethInfo.image
-        })
-      }
+      console.log('API Response:', response.data)
+
+      // Spam olmayan ve değeri olan token'ları filtrele
+      const validTokens = response.data.result.filter((token: TokenBalance) =>
+        !token.possible_spam && token.usd_value > 0
+      )
 
       // USD değerine göre sırala
-      const sortedBalances = balances.sort((a, b) => b.totalValue - a.totalValue)
+      const sortedBalances = validTokens.sort((a: TokenBalance, b: TokenBalance) => b.usd_value - a.usd_value)
 
       // Tüm token'ları sakla
       setAllBalances(sortedBalances)
 
       // Sadece 10 dolar üzeri değeri olan token'ları göster
-      const filteredBalances = sortedBalances.filter(token => token.totalValue >= 10)
+      const filteredBalances = sortedBalances.filter((token: TokenBalance) => token.usd_value >= 10)
       setBalances(filteredBalances)
 
-      const total = sortedBalances.reduce((acc, token) => acc + token.totalValue, 0)
+      const total = sortedBalances.reduce((acc: number, token: TokenBalance) => acc + token.usd_value, 0)
       setTotalValue(total)
     } catch (error: any) {
       console.error('Error fetching balances:', error)
@@ -272,9 +168,6 @@ function App() {
       setLoading(false)
     }
   }
-
-  // Gösterilecek token'ları belirle
-  const displayedBalances = showAll ? allBalances : balances
 
   return (
     <div className="min-h-screen bg-[#13141b] text-white p-8 flex items-center justify-center">
@@ -328,7 +221,7 @@ function App() {
 
         {loading ? (
           <div className="text-center text-gray-400">Loading...</div>
-        ) : displayedBalances.length > 0 ? (
+        ) : balances.length > 0 ? (
           <div className="bg-[#1E2028] rounded-lg overflow-hidden">
             <table className="w-full">
               <thead>
@@ -337,27 +230,52 @@ function App() {
                   <th className="text-right p-4">Price</th>
                   <th className="text-right p-4">Amount</th>
                   <th className="text-right p-4">USD Value</th>
+                  <th className="text-right p-4">24h Change</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
-                {displayedBalances.map((token) => (
+                {(showAll ? allBalances : balances).map((token) => (
                   <tr key={token.token_address} className="hover:bg-gray-800/30">
                     <td className="p-4">
                       <div className="flex items-center gap-3">
-                        {token.thumbnail && (
+                        {token.thumbnail ? (
                           <img src={token.thumbnail} alt={token.name} className="w-8 h-8 rounded-full bg-gray-800" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center text-lg font-bold">
+                            {token.symbol.charAt(0)}
+                          </div>
                         )}
                         <span className="font-medium">{token.symbol}</span>
                       </div>
                     </td>
                     <td className="p-4 text-right">
-                      ${token.usdPrice.toFixed(4)}
+                      ${token.usd_price.toFixed(4)}
                     </td>
                     <td className="p-4 text-right">
-                      {formatAmount(parseFloat(token.balance))}
+                      {formatAmount(parseFloat(token.balance_formatted))}
                     </td>
                     <td className="p-4 text-right">
-                      {formatMoney(token.totalValue)}
+                      {formatMoney(token.usd_value)}
+                    </td>
+                    <td className="p-4 text-right">
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={`${token.usd_price_24hr_percent_change > 0
+                            ? 'text-green-400'
+                            : token.usd_price_24hr_percent_change < 0
+                              ? 'text-red-400'
+                              : ''
+                          }`}>
+                          {token.usd_price_24hr_percent_change > 0 ? '+' : ''}{token.usd_price_24hr_percent_change?.toFixed(2)}%
+                        </span>
+                        <span className={`text-sm ${token.usd_price_24hr_usd_change > 0
+                            ? 'text-green-400'
+                            : token.usd_price_24hr_usd_change < 0
+                              ? 'text-red-400'
+                              : ''
+                          }`}>
+                          {token.usd_price_24hr_usd_change > 0 ? '+' : ''}{formatMoney(token.usd_price_24hr_usd_change)}
+                        </span>
+                      </div>
                     </td>
                   </tr>
                 ))}
