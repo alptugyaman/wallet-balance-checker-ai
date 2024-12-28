@@ -3,6 +3,21 @@ import axios from 'axios'
 
 const MORALIS_API_KEY = import.meta.env.VITE_MORALIS_API_KEY
 
+interface ChainOption {
+  name: string
+  chainId: string
+}
+
+const CHAIN_OPTIONS: ChainOption[] = [
+  { name: 'ETHEREUM', chainId: '0x1' },
+  { name: 'BSC', chainId: '0x38' },
+  { name: 'AVALANCHE', chainId: '0xa86a' },
+  { name: 'ARBITRUM', chainId: '0xa4b1' },
+  { name: 'BASE', chainId: '0x2105' },
+  { name: 'OPTIMISM', chainId: '0xa' },
+  { name: 'LINEA', chainId: '0xe708' }
+]
+
 // Para birimi formatı için
 const formatMoney = (amount: number) => {
   return new Intl.NumberFormat('en-US', {
@@ -59,6 +74,7 @@ interface TokenBalance {
 
 function App() {
   const [address, setAddress] = useState('')
+  const [selectedChain, setSelectedChain] = useState<ChainOption>(CHAIN_OPTIONS[0])
   const [loading, setLoading] = useState(false)
   const [balances, setBalances] = useState<TokenBalance[]>([])
   const [allBalances, setAllBalances] = useState<TokenBalance[]>([])
@@ -67,6 +83,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [recentAddresses, setRecentAddresses] = useState<string[]>([])
+  const [hasSearched, setHasSearched] = useState(false)
 
   // Click-outside handler için ref
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -126,11 +143,12 @@ function App() {
     setBalances([])
     setAllBalances([])
     setShowAll(false)
+    setHasSearched(true)
 
     try {
       const response = await moralisApi.get(`/wallets/${address}/tokens`, {
         params: {
-          chain: '0x1'
+          chain: selectedChain.chainId
         }
       })
 
@@ -204,6 +222,17 @@ function App() {
                 </div>
               )}
             </div>
+            <select
+              value={selectedChain.chainId}
+              onChange={(e) => setSelectedChain(CHAIN_OPTIONS.find(chain => chain.chainId === e.target.value) || CHAIN_OPTIONS[0])}
+              className="px-4 py-3 bg-[#1E2028] border border-gray-700/50 rounded-lg focus:outline-none focus:border-blue-500 appearance-none cursor-pointer min-w-[140px] relative bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23666%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-[length:24px] bg-[right_8px_center] bg-no-repeat"
+            >
+              {CHAIN_OPTIONS.map((chain) => (
+                <option key={chain.chainId} value={chain.chainId} className="py-2">
+                  {chain.name}
+                </option>
+              ))}
+            </select>
             <button
               onClick={fetchBalances}
               disabled={loading}
@@ -221,6 +250,8 @@ function App() {
 
         {loading ? (
           <div className="text-center text-gray-400">Loading...</div>
+        ) : error ? (
+          <div className="text-center text-red-400">{error}</div>
         ) : balances.length > 0 ? (
           <div className="bg-[#1E2028] rounded-lg overflow-hidden">
             <table className="w-full">
@@ -260,18 +291,18 @@ function App() {
                     <td className="p-4 text-right">
                       <div className="flex flex-col items-end gap-1">
                         <span className={`${token.usd_price_24hr_percent_change > 0
-                            ? 'text-green-400'
-                            : token.usd_price_24hr_percent_change < 0
-                              ? 'text-red-400'
-                              : ''
+                          ? 'text-green-400'
+                          : token.usd_price_24hr_percent_change < 0
+                            ? 'text-red-400'
+                            : ''
                           }`}>
                           {token.usd_price_24hr_percent_change > 0 ? '+' : ''}{token.usd_price_24hr_percent_change?.toFixed(2)}%
                         </span>
                         <span className={`text-sm ${token.usd_price_24hr_usd_change > 0
-                            ? 'text-green-400'
-                            : token.usd_price_24hr_usd_change < 0
-                              ? 'text-red-400'
-                              : ''
+                          ? 'text-green-400'
+                          : token.usd_price_24hr_usd_change < 0
+                            ? 'text-red-400'
+                            : ''
                           }`}>
                           {token.usd_price_24hr_usd_change > 0 ? '+' : ''}{formatMoney(token.usd_price_24hr_usd_change)}
                         </span>
@@ -296,6 +327,13 @@ function App() {
               <div className="mt-4 text-[16px] text-white">
                 Total Value: {formatMoney(totalValue)}
               </div>
+            </div>
+          </div>
+        ) : hasSearched ? (
+          <div className="text-center py-8 bg-[#1E2028] rounded-lg">
+            <div className="text-gray-400 mb-2">No tokens found on {selectedChain.name}</div>
+            <div className="text-sm text-gray-500">
+              This wallet doesn't have any tokens with value on the selected network.
             </div>
           </div>
         ) : null}
