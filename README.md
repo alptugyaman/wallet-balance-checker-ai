@@ -2,6 +2,10 @@
 
 A simple web application to check ERC-20 token balances for any Ethereum wallet address.
 
+## Demo
+
+[Live Demo](https://676fb03bb0b774423d820e83--heroic-biscuit-92e520.netlify.app/)
+
 ## Features
 
 - Check ETH and ERC-20 token balances
